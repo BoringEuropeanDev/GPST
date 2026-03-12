@@ -6,7 +6,6 @@
 
 A full-stack, AI-powered stock intelligence terminal built entirely on **free and open data sources**. No paid APIs required. Features a dark trading-terminal UI, real-time market data, ML-based directional predictions, news sentiment analysis, macroeconomic context, and continuous model evaluation.
 
-![Terminal Screenshot](https://via.placeholder.com/900x500/050810/00f5a0?text=GPST+Terminal)
 
 ---
 
