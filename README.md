@@ -455,9 +455,6 @@ Pull requests welcome! Please:
 
 ---
 
-## 📜 License
-
-MIT License — free to use, modify, and distribute. See `LICENSE` for details.
 
 ---
 
