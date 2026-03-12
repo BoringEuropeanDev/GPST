@@ -1,13 +1,5 @@
 {
   "version": 2,
-  "name": "gpst-frontend",
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": { "distDir": "build" }
-    }
-  ],
   "routes": [
     {
       "src": "/api/(.*)",
@@ -17,8 +9,5 @@
       "src": "/(.*)",
       "dest": "/index.html"
     }
-  ],
-  "env": {
-    "REACT_APP_API_URL": "https://gpst-production.up.railway.app/api"
-  }
+  ]
 }
