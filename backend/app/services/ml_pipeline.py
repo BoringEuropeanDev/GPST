@@ -12,6 +12,18 @@ v3 upgrades:
   - Market context features: SPY, QQQ, ^VIX merged into every row.
       spy_ret_1d, spy_ret_5d, qqq_ret_1d, vix_level, vix_change_1d
   - Total features: 15 ticker-level + 5 market = 20.
+
+File layout:
+    backend/app/models/
+        tree_model.pkl
+        logreg_model.pkl
+        scaler.pkl
+        feature_meta.json
+    backend/app/dataset_store/prices/
+        AAPL.parquet
+        MSFT.parquet
+        ...
+        _VIX.parquet    ← ^VIX stored with ^ replaced by _
 """
 import json
 import logging
