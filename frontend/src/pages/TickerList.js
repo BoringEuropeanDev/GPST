@@ -1,24 +1,26 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { stocksAPI } from '../utils/api';
-import { formatPrice, formatMarketCap, formatVolume, getChangeClass } from '../utils/format';
+import { formatPrice, formatMarketCap, formatVolume } from '../utils/format';
 import MarketOverview from '../components/MarketOverview';
 
 const TICKERS_PER_PAGE = 50;
 
 const TickerList = () => {
   const navigate = useNavigate();
-  const [stocks, setStocks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [sortField, setSortField] = useState('market_cap');
-  const [sortDir, setSortDir] = useState('desc');
+  const [stocks,      setStocks]      = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState(null);
+  const [page,        setPage]        = useState(1);
+  const [totalPages,  setTotalPages]  = useState(1);
+  const [total,       setTotal]       = useState(0);
+  const [sortField,   setSortField]   = useState('market_cap');
+  const [sortDir,     setSortDir]     = useState('desc');
   const [lastUpdated, setLastUpdated] = useState(null);
 
   const loadStocks = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await stocksAPI.list(page, TICKERS_PER_PAGE);
       setStocks(res.data.stocks || []);
@@ -27,6 +29,7 @@ const TickerList = () => {
       setLastUpdated(new Date());
     } catch (e) {
       console.error('Failed to load stocks:', e);
+      setError('Unable to reach the backend. Please try again in a moment.');
     }
     setLoading(false);
   }, [page]);
@@ -67,10 +70,20 @@ const TickerList = () => {
             </div>
             <div style={styles.topBarMeta}>
               {total} instruments · {lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : ''}
+              <span style={{ color: 'var(--text-muted)', marginLeft: 12, fontSize: 10 }}>
+                ⓘ Sort applies to current page only
+              </span>
             </div>
           </div>
           <div style={styles.refreshBtn} onClick={loadStocks}>↻ REFRESH</div>
         </div>
+
+        {/* Error banner */}
+        {error && (
+          <div style={{ background: 'rgba(255,71,87,0.08)', border: '1px solid rgba(255,71,87,0.3)', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: 12, color: 'var(--accent-red)', fontFamily: 'var(--font-mono)' }}>
+            ⚠ {error}
+          </div>
+        )}
 
         <div style={styles.tableWrapper}>
           <table style={styles.table}>
@@ -107,9 +120,9 @@ const TickerList = () => {
                 ))
               ) : (
                 sorted.map((stock, idx) => {
-                  const change = stock.change_pct;
+                  const change      = stock.change_pct;
                   const changeColor = change > 0 ? 'var(--accent-green)' : change < 0 ? 'var(--accent-red)' : 'var(--text-secondary)';
-                  const rowNum = (page - 1) * TICKERS_PER_PAGE + idx + 1;
+                  const rowNum      = (page - 1) * TICKERS_PER_PAGE + idx + 1;
                   return (
                     <tr
                       key={stock.ticker}
@@ -153,14 +166,8 @@ const TickerList = () => {
                         <button
                           style={styles.viewBtn}
                           onClick={() => navigate(`/stock/${stock.ticker}`)}
-                          onMouseEnter={e => {
-                            e.target.style.background = 'var(--accent-green)';
-                            e.target.style.color = 'var(--bg-primary)';
-                          }}
-                          onMouseLeave={e => {
-                            e.target.style.background = 'transparent';
-                            e.target.style.color = 'var(--accent-green)';
-                          }}
+                          onMouseEnter={e => { e.target.style.background = 'var(--accent-green)'; e.target.style.color = 'var(--bg-primary)'; }}
+                          onMouseLeave={e => { e.target.style.background = 'transparent'; e.target.style.color = 'var(--accent-green)'; }}
                         >
                           VIEW MORE →
                         </button>
@@ -178,9 +185,7 @@ const TickerList = () => {
             Showing {(page - 1) * TICKERS_PER_PAGE + 1}–{Math.min(page * TICKERS_PER_PAGE, total)} of {total}
           </span>
           <div style={styles.pageButtons}>
-            <button style={styles.pageBtn} disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
-              ← PREV
-            </button>
+            <button style={styles.pageBtn} disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>← PREV</button>
             {[...Array(Math.min(totalPages, 5))].map((_, i) => (
               <button
                 key={i + 1}
@@ -188,9 +193,7 @@ const TickerList = () => {
                 onClick={() => setPage(i + 1)}
               >{i + 1}</button>
             ))}
-            <button style={styles.pageBtn} disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>
-              NEXT →
-            </button>
+            <button style={styles.pageBtn} disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>NEXT →</button>
           </div>
         </div>
 
@@ -204,32 +207,32 @@ const TickerList = () => {
 };
 
 const styles = {
-  container: { padding: '24px', maxWidth: 1400, margin: '0 auto' },
-  topBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
-  topBarLeft: {},
-  terminalTitle: { fontFamily: 'var(--font-mono)', fontSize: 14, color: 'var(--text-secondary)', marginBottom: 4 },
-  topBarMeta: { fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' },
-  refreshBtn: { background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', padding: '6px 12px', borderRadius: 'var(--radius)', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-mono)', letterSpacing: '0.1em' },
-  tableWrapper: { overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)' },
-  table: { width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' },
-  headerRow: { background: 'var(--bg-elevated)', borderBottom: '2px solid var(--border)' },
-  th: { padding: '10px 14px', fontSize: 9, color: 'var(--text-muted)', letterSpacing: '0.15em', fontFamily: 'var(--font-mono)', textAlign: 'right', whiteSpace: 'nowrap', userSelect: 'none' },
-  row: { borderBottom: '1px solid rgba(30,42,66,0.5)', transition: 'background 0.1s' },
-  td: { padding: '10px 14px', textAlign: 'right', fontSize: 12, fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-  tickerCell: { display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' },
-  tickerSymbol: { color: 'var(--accent-cyan)', fontWeight: 700, fontSize: 13, letterSpacing: '0.05em' },
-  exchangeBadge: { fontSize: 8, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 2, padding: '1px 3px', letterSpacing: '0.1em' },
-  companyName: { color: 'var(--text-primary)', fontSize: 12, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200, textAlign: 'left' },
-  price: { color: 'var(--text-primary)', fontWeight: 500, fontSize: 13 },
-  changeBadge: { display: 'inline-block', fontSize: 11, padding: '2px 8px', border: '1px solid', borderRadius: 2, fontWeight: 500 },
-  sectorTag: { fontSize: 9, color: 'var(--accent-purple)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 2, padding: '2px 6px', letterSpacing: '0.05em', display: 'inline-block', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' },
-  viewBtn: { background: 'transparent', border: '1px solid var(--accent-green)', color: 'var(--accent-green)', padding: '4px 10px', borderRadius: 'var(--radius)', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontWeight: 700, whiteSpace: 'nowrap' },
-  pagination: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, padding: '12px 0', borderTop: '1px solid var(--border)' },
-  pageInfo: { fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' },
-  pageButtons: { display: 'flex', gap: 4 },
-  pageBtn: { background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', padding: '4px 10px', borderRadius: 'var(--radius)', fontSize: 10, cursor: 'pointer', fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' },
-  pageBtnActive: { background: 'var(--accent-green)', borderColor: 'var(--accent-green)', color: 'var(--bg-primary)', fontWeight: 700 },
-  footerDisclaimer: { marginTop: 24, padding: '12px 16px', background: 'rgba(245,166,35,0.05)', border: '1px solid rgba(245,166,35,0.2)', borderRadius: 'var(--radius)', fontSize: 10, color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)', letterSpacing: '0.02em', lineHeight: 1.6 },
+  container:       { padding: '24px', maxWidth: 1400, margin: '0 auto' },
+  topBar:          { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
+  topBarLeft:      {},
+  terminalTitle:   { fontFamily: 'var(--font-mono)', fontSize: 14, color: 'var(--text-secondary)', marginBottom: 4 },
+  topBarMeta:      { fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' },
+  refreshBtn:      { background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', padding: '6px 12px', borderRadius: 'var(--radius)', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-mono)', letterSpacing: '0.1em' },
+  tableWrapper:    { overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)' },
+  table:           { width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' },
+  headerRow:       { background: 'var(--bg-elevated)', borderBottom: '2px solid var(--border)' },
+  th:              { padding: '10px 14px', fontSize: 9, color: 'var(--text-muted)', letterSpacing: '0.15em', fontFamily: 'var(--font-mono)', textAlign: 'right', whiteSpace: 'nowrap', userSelect: 'none' },
+  row:             { borderBottom: '1px solid rgba(30,42,66,0.5)', transition: 'background 0.1s' },
+  td:              { padding: '10px 14px', textAlign: 'right', fontSize: 12, fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  tickerCell:      { display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' },
+  tickerSymbol:    { color: 'var(--accent-cyan)', fontWeight: 700, fontSize: 13, letterSpacing: '0.05em' },
+  exchangeBadge:   { fontSize: 8, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 2, padding: '1px 3px', letterSpacing: '0.1em' },
+  companyName:     { color: 'var(--text-primary)', fontSize: 12, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200, textAlign: 'left' },
+  price:           { color: 'var(--text-primary)', fontWeight: 500, fontSize: 13 },
+  changeBadge:     { display: 'inline-block', fontSize: 11, padding: '2px 8px', border: '1px solid', borderRadius: 2, fontWeight: 500 },
+  sectorTag:       { fontSize: 9, color: 'var(--accent-purple)', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 2, padding: '2px 6px', letterSpacing: '0.05em', display: 'inline-block', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' },
+  viewBtn:         { background: 'transparent', border: '1px solid var(--accent-green)', color: 'var(--accent-green)', padding: '4px 10px', borderRadius: 'var(--radius)', fontSize: 10, letterSpacing: '0.1em', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontWeight: 700, whiteSpace: 'nowrap' },
+  pagination:      { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, padding: '12px 0', borderTop: '1px solid var(--border)' },
+  pageInfo:        { fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' },
+  pageButtons:     { display: 'flex', gap: 4 },
+  pageBtn:         { background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', padding: '4px 10px', borderRadius: 'var(--radius)', fontSize: 10, cursor: 'pointer', fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' },
+  pageBtnActive:   { background: 'var(--accent-green)', borderColor: 'var(--accent-green)', color: 'var(--bg-primary)', fontWeight: 700 },
+  footerDisclaimer:{ marginTop: 24, padding: '12px 16px', background: 'rgba(245,166,35,0.05)', border: '1px solid rgba(245,166,35,0.2)', borderRadius: 'var(--radius)', fontSize: 10, color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)', letterSpacing: '0.02em', lineHeight: 1.6 },
 };
 
 export default TickerList;
