@@ -81,3 +81,5 @@ async def root():
         "disclaimer": "This is not financial advice. All predictions are for informational purposes only.",
         "docs": "/docs"
     }
+
+
