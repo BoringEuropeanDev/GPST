@@ -388,13 +388,15 @@ class DataIngestionService:
         try:
             from app.database import AsyncSessionLocal, Stock
             from sqlalchemy import select
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
             async with AsyncSessionLocal() as session:
                 tickers = list(GLOBAL_TICKERS.items())
+
                 for ticker, name in tickers[:20]:
                     try:
                         quote = await self.get_yahoo_quote(ticker)
                         if quote:
-                            stock = Stock(
+                            stmt = pg_insert(Stock).values(
                                 ticker=ticker, name=name,
                                 current_price=quote.get("current_price"),
                                 previous_close=quote.get("previous_close"),
@@ -402,16 +404,25 @@ class DataIngestionService:
                                 exchange=quote.get("exchange", ""),
                                 market_cap=quote.get("market_cap"),
                                 volume=quote.get("volume"),
+                            ).on_conflict_do_update(
+                                index_elements=["ticker"],
+                                set_=dict(
+                                    current_price=quote.get("current_price"),
+                                    previous_close=quote.get("previous_close"),
+                                    volume=quote.get("volume"),
+                                    market_cap=quote.get("market_cap"),
+                                )
                             )
-                            session.add(stock)
+                            await session.execute(stmt)
                         await asyncio.sleep(0.5)
                     except Exception as e:
                         logger.error(f"Error loading {ticker}: {e}")
 
                 for ticker, name in tickers[20:]:
-                    result = await session.execute(select(Stock).where(Stock.ticker == ticker))
-                    if not result.scalar_one_or_none():
-                        session.add(Stock(ticker=ticker, name=name))
+                    stmt = pg_insert(Stock).values(
+                        ticker=ticker, name=name
+                    ).on_conflict_do_nothing(index_elements=["ticker"])
+                    await session.execute(stmt)
 
                 await session.commit()
                 logger.info(f"Initial load complete: {len(tickers)} tickers")
