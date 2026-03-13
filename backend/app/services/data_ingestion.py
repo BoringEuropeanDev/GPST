@@ -39,3 +39,5 @@ async def refresh_stock_data(self):
                 await asyncio.sleep(1)
     except Exception as e:
         logger.error(f"Error refreshing stock data: {e}")
+
+                                    
