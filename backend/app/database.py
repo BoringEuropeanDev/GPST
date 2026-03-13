@@ -136,6 +136,7 @@ class SectorPerformance(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 class ModelMetrics(Base):
+    """Legacy post-hoc accuracy tracking (kept intact)."""
     __tablename__ = "model_metrics"
     id = Column(Integer, primary_key=True, index=True)
     model_version = Column(String(50))
@@ -148,6 +149,24 @@ class ModelMetrics(Base):
     correct_predictions = Column(Integer)
     metrics_detail = Column(JSON)
     created_at = Column(DateTime, server_default=func.now())
+
+# ── NEW: ML training-time metrics ─────────────────────────────────────────────
+class MLModelMetric(Base):
+    """
+    Written once per training run per model type.
+    ticker='GLOBAL' means a pooled (cross-ticker) model.
+    """
+    __tablename__ = "ml_model_metrics"
+    id             = Column(Integer, primary_key=True, index=True)
+    ticker         = Column(String(20), index=True, default="GLOBAL")
+    model_type     = Column(String(20), index=True)   # 'tree' | 'logreg'
+    train_end_date = Column(DateTime, index=True)
+    val_accuracy   = Column(Float)
+    val_auc        = Column(Float)
+    hit_rate_up    = Column(Float)
+    hit_rate_down  = Column(Float)
+    samples        = Column(Integer)
+    created_at     = Column(DateTime, server_default=func.now())
 
 async def init_db():
     async with engine.begin() as conn:
