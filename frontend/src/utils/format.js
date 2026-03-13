@@ -1,7 +1,7 @@
 export const formatPrice = (price, currency = 'USD') => {
   if (price == null) return '—';
   return new Intl.NumberFormat('en-US', {
-    style: 'currency', currency,
+    style: 'currency', currency: currency || 'USD',
     minimumFractionDigits: 2,
     maximumFractionDigits: price < 1 ? 4 : 2,
   }).format(price);
