@@ -24,46 +24,53 @@ MEDIASTACK_KEY    = os.getenv("MEDIASTACK_KEY", "")
 FRED_API_KEY      = os.getenv("FRED_API_KEY", "")
 
 GLOBAL_TICKERS = {
-    # US Large Cap
+    # US Mega-cap tech
     "AAPL": "Apple Inc.", "MSFT": "Microsoft Corporation", "GOOGL": "Alphabet Inc.",
     "AMZN": "Amazon.com Inc.", "NVDA": "NVIDIA Corporation", "META": "Meta Platforms Inc.",
-    "TSLA": "Tesla Inc.", "BRK-B": "Berkshire Hathaway", "JPM": "JPMorgan Chase & Co.",
-    "V": "Visa Inc.", "JNJ": "Johnson & Johnson", "WMT": "Walmart Inc.",
-    "PG": "Procter & Gamble Co.", "MA": "Mastercard Inc.", "HD": "Home Depot Inc.",
-    "UNH": "UnitedHealth Group", "NFLX": "Netflix Inc.", "LLY": "Eli Lilly and Co.",
-    "AVGO": "Broadcom Inc.", "XOM": "Exxon Mobil Corp.", "COST": "Costco Wholesale",
-    "ABBV": "AbbVie Inc.", "CVX": "Chevron Corporation", "PEP": "PepsiCo Inc.",
-    "TMO": "Thermo Fisher Scientific", "MRK": "Merck & Co.", "ORCL": "Oracle Corporation",
-    "CRM": "Salesforce Inc.", "AMD": "Advanced Micro Devices", "ACN": "Accenture plc",
-    "NKE": "Nike Inc.", "ADBE": "Adobe Inc.", "IBM": "IBM Corporation",
+    "TSLA": "Tesla Inc.", "AVGO": "Broadcom Inc.", "ORCL": "Oracle Corporation",
+    "ADBE": "Adobe Inc.", "CRM": "Salesforce Inc.", "AMD": "Advanced Micro Devices",
     "QCOM": "Qualcomm Inc.", "TXN": "Texas Instruments", "INTC": "Intel Corporation",
-    "PYPL": "PayPal Holdings", "UBER": "Uber Technologies", "SPOT": "Spotify Technology",
-    "SHOP": "Shopify Inc.", "SQ": "Block Inc.", "COIN": "Coinbase Global",
+    "IBM": "IBM Corporation", "CSCO": "Cisco Systems",
+    "NOW": "ServiceNow Inc.", "SNOW": "Snowflake Inc.", "PLTR": "Palantir Technologies",
+    # US Financials
+    "JPM": "JPMorgan Chase & Co.", "BAC": "Bank of America", "WFC": "Wells Fargo",
+    "GS": "Goldman Sachs", "MS": "Morgan Stanley", "C": "Citigroup Inc.",
+    "BLK": "BlackRock Inc.", "V": "Visa Inc.", "MA": "Mastercard Inc.",
+    "PYPL": "PayPal Holdings", "SQ": "Block Inc.", "COIN": "Coinbase Global",
+    # US Consumer / Retail
+    "WMT": "Walmart Inc.", "COST": "Costco Wholesale", "HD": "Home Depot Inc.",
+    "TGT": "Target Corporation", "MCD": "McDonald's Corporation",
+    "SBUX": "Starbucks Corporation", "NKE": "Nike Inc.",
+    "KO": "Coca-Cola Company", "PEP": "PepsiCo Inc.",
+    "PG": "Procter & Gamble Co.", "PM": "Philip Morris", "MO": "Altria Group",
+    # US Healthcare / Pharma
+    "UNH": "UnitedHealth Group", "JNJ": "Johnson & Johnson", "LLY": "Eli Lilly and Co.",
+    "ABBV": "AbbVie Inc.", "MRK": "Merck & Co.", "PFE": "Pfizer Inc.",
+    "MRNA": "Moderna Inc.", "BIIB": "Biogen Inc.", "GILD": "Gilead Sciences",
+    "REGN": "Regeneron Pharmaceuticals", "TMO": "Thermo Fisher Scientific",
+    # US Energy
+    "XOM": "Exxon Mobil Corp.", "CVX": "Chevron Corporation",
+    "SLB": "Schlumberger Limited", "HAL": "Halliburton Company",
+    "MPC": "Marathon Petroleum", "PSX": "Phillips 66", "VLO": "Valero Energy",
+    # US Industrials / Materials / Diversified
+    "FCX": "Freeport-McMoRan", "NEM": "Newmont Corporation", "AA": "Alcoa Corporation",
+    "UPS": "United Parcel Service", "FDX": "FedEx Corporation",
+    "ACN": "Accenture plc", "BRK-B": "Berkshire Hathaway",
+    # Growth / Tech mid-cap
+    "NFLX": "Netflix Inc.", "UBER": "Uber Technologies", "SPOT": "Spotify Technology",
+    "SHOP": "Shopify Inc.", "CRWD": "CrowdStrike Holdings",
+    "DDOG": "Datadog Inc.", "ZS": "Zscaler Inc.", "NET": "Cloudflare Inc.",
     # ETFs
     "SPY": "SPDR S&P 500 ETF", "QQQ": "Invesco QQQ Trust", "IWM": "iShares Russell 2000",
     "DIA": "SPDR Dow Jones ETF", "VTI": "Vanguard Total Stock Market",
     "GLD": "SPDR Gold Shares", "SLV": "iShares Silver Trust",
     "TLT": "iShares 20+ Year Treasury", "HYG": "iShares High Yield Bond",
-    # International
+    # International ADRs
     "TSM": "Taiwan Semiconductor", "BABA": "Alibaba Group", "TM": "Toyota Motor",
     "SONY": "Sony Group Corporation", "NVO": "Novo Nordisk", "ASML": "ASML Holding",
     "SAP": "SAP SE", "HSBC": "HSBC Holdings", "BP": "BP plc", "RIO": "Rio Tinto",
     "BHP": "BHP Group", "VALE": "Vale S.A.", "BBVA": "Banco Bilbao Vizcaya",
     "SAN": "Banco Santander", "UBS": "UBS Group",
-    # Energy
-    "SLB": "Schlumberger Limited", "HAL": "Halliburton Company", "MPC": "Marathon Petroleum",
-    "PSX": "Phillips 66", "VLO": "Valero Energy",
-    # Healthcare
-    "PFE": "Pfizer Inc.", "MRNA": "Moderna Inc.", "BIIB": "Biogen Inc.",
-    "GILD": "Gilead Sciences", "REGN": "Regeneron Pharmaceuticals",
-    # Financials
-    "BAC": "Bank of America", "WFC": "Wells Fargo", "GS": "Goldman Sachs",
-    "MS": "Morgan Stanley", "C": "Citigroup Inc.", "BLK": "BlackRock Inc.",
-    # Materials
-    "FCX": "Freeport-McMoRan", "NEM": "Newmont Corporation", "AA": "Alcoa Corporation",
-    # Consumer
-    "MCD": "McDonald's Corporation", "SBUX": "Starbucks Corporation",
-    "KO": "Coca-Cola Company", "PM": "Philip Morris", "MO": "Altria Group",
 }
 
 SECTORS = [
@@ -153,7 +160,7 @@ class DataIngestionService:
         return None
 
     async def get_yahoo_history(self, ticker: str, period: str = "1y") -> List[Dict]:
-        range_map = {"1mo": "1mo", "3mo": "3mo", "6mo": "6mo", "1y": "1y", "2y": "2y", "5y": "5y"}
+        range_map = {"5d": "5d", "1mo": "1mo", "3mo": "3mo", "6mo": "6mo", "1y": "1y", "2y": "2y", "5y": "5y"}
         range_str = range_map.get(period, "1y")
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range={range_str}"
         try:
