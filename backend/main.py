@@ -4,6 +4,7 @@ FastAPI application with async support
 """
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
@@ -11,8 +12,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.api import stocks, predictions, sectors, news, health
-from app.services.data_ingestion import DataIngestionService
-from app.services.prediction_engine import PredictionEngine
+from app.services.data_ingestion import ingestion_service          # shared singleton
+from app.services.prediction_engine import prediction_engine       # shared singleton
 from app.database import init_db
 
 logging.basicConfig(level=logging.INFO)
@@ -27,30 +28,24 @@ async def lifespan(app: FastAPI):
     await init_db()
 
     logger.info("Starting schedulers...")
-    ingestion  = DataIngestionService()
-    prediction = PredictionEngine()
 
-    # ── Existing jobs (unchanged) ──────────────────────────────────────────────
-    scheduler.add_job(ingestion.refresh_stock_data,   'interval', minutes=15, id='stock_refresh')
-    scheduler.add_job(ingestion.refresh_news_data,    'interval', minutes=30, id='news_refresh')
-    scheduler.add_job(ingestion.refresh_economic_data,'interval', hours=6,   id='economic_refresh')
-    scheduler.add_job(prediction.run_predictions,     'interval', hours=1,   id='predictions')
-    scheduler.add_job(prediction.evaluate_past_predictions, 'cron', hour=18, minute=0, id='evaluate')
+    # ── Existing jobs ──────────────────────────────────────────────────────────
+    scheduler.add_job(ingestion_service.refresh_stock_data,        'interval', minutes=15, id='stock_refresh')
+    scheduler.add_job(ingestion_service.refresh_news_data,         'interval', minutes=30, id='news_refresh')
+    scheduler.add_job(ingestion_service.refresh_economic_data,     'interval', hours=6,   id='economic_refresh')
+    scheduler.add_job(prediction_engine.run_predictions,           'interval', hours=1,   id='predictions')
+    scheduler.add_job(prediction_engine.evaluate_past_predictions, 'cron',     hour=18, minute=0, id='evaluate')
 
-    # ── NEW: Nightly ML retrain at 03:00 UTC ──────────────────────────────────
-    # Runs in the same process via asyncio.to_thread for the CPU-bound steps.
-    # On Railway containers this is fine — training takes ~30-90 s for 30 tickers.
-    # To disable: comment out the line below or set DISABLE_ML_TRAINING=true in env.
-    import os
+    # ── Nightly ML retrain at 03:00 UTC ───────────────────────────────────────
+    # Set DISABLE_ML_TRAINING=true in Railway env to skip (useful while iterating).
     if os.getenv("DISABLE_ML_TRAINING", "").lower() not in ("true", "1", "yes"):
         scheduler.add_job(
-            prediction.train_models,
+            prediction_engine.train_models,
             'cron',
-            hour=3,
-            minute=0,
+            hour=3, minute=0,
             id='retrain_models',
-            max_instances=1,        # never overlap
-            coalesce=True,          # skip missed fires
+            max_instances=1,
+            coalesce=True,
         )
         logger.info("Nightly ML retraining job scheduled at 03:00 UTC")
     else:
@@ -58,7 +53,7 @@ async def lifespan(app: FastAPI):
 
     scheduler.start()
 
-    asyncio.create_task(ingestion.initial_load())
+    asyncio.create_task(ingestion_service.initial_load())
 
     yield
 
@@ -92,11 +87,11 @@ async def add_cors_headers(request: Request, call_next):
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-app.include_router(health.router,       prefix="/api/health",       tags=["health"])
-app.include_router(stocks.router,       prefix="/api/stocks",       tags=["stocks"])
-app.include_router(predictions.router,  prefix="/api/predictions",  tags=["predictions"])
-app.include_router(sectors.router,      prefix="/api/sectors",      tags=["sectors"])
-app.include_router(news.router,         prefix="/api/news",         tags=["news"])
+app.include_router(health.router,      prefix="/api/health",      tags=["health"])
+app.include_router(stocks.router,      prefix="/api/stocks",      tags=["stocks"])
+app.include_router(predictions.router, prefix="/api/predictions", tags=["predictions"])
+app.include_router(sectors.router,     prefix="/api/sectors",     tags=["sectors"])
+app.include_router(news.router,        prefix="/api/news",        tags=["news"])
 
 
 @app.get("/")
