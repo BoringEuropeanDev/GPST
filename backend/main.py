@@ -50,6 +50,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# GZip first (runs last), CORS last (runs first)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -57,7 +59,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.include_router(health.router, prefix="/api/health", tags=["health"])
 app.include_router(stocks.router, prefix="/api/stocks", tags=["stocks"])
