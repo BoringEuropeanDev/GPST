@@ -2,11 +2,11 @@
 Predictive Engine - ML-based stock direction prediction
 DISCLAIMER: For informational purposes only. Not financial advice.
 
-Changes vs original:
-  - train_models(): builds training frame, trains RF + LogReg, saves artifacts,
-    writes MLModelMetric rows to DB.
-  - predict_ticker(): blends legacy heuristic score with ML ensemble probability.
-  - _load_price_df(): converts Yahoo history list → pandas DataFrame for ML.
+Fixes vs previous version:
+  - Uses module-level ingestion_service singleton (no per-call client creation)
+  - evaluate_past_predictions uses .is_(None) for correct IS NULL SQL
+  - PredictionEngine exported as module-level singleton `prediction_engine`
+    so main.py and predictions.py share the same macro/sector cache
 """
 import logging
 import asyncio
@@ -24,7 +24,8 @@ DISCLAIMER = (
     "investment decisions."
 )
 
-# ─── Legacy heuristic helpers (unchanged) ────────────────────────────────────
+
+# ─── Legacy heuristic helpers (unchanged) ─────────────────────────────────────
 
 def calculate_technical_indicators(prices: List[Dict]) -> Dict:
     if len(prices) < 20:
@@ -41,13 +42,13 @@ def calculate_technical_indicators(prices: List[Dict]) -> Dict:
     sma50 = float(np.mean(closes_arr[-50:])) if len(closes_arr) >= 50 else None
 
     if len(closes_arr) >= 14:
-        deltas    = np.diff(closes_arr[-15:])
-        gains     = np.where(deltas > 0, deltas, 0)
-        losses    = np.where(deltas < 0, -deltas, 0)
-        avg_gain  = np.mean(gains)  if len(gains)  > 0 else 0
-        avg_loss  = np.mean(losses) if len(losses) > 0 else 0
-        rs        = avg_gain / avg_loss if avg_loss != 0 else 100
-        rsi       = 100 - (100 / (1 + rs))
+        deltas   = np.diff(closes_arr[-15:])
+        gains    = np.where(deltas > 0, deltas, 0)
+        losses   = np.where(deltas < 0, -deltas, 0)
+        avg_gain = np.mean(gains)  if len(gains)  > 0 else 0
+        avg_loss = np.mean(losses) if len(losses) > 0 else 0
+        rs       = avg_gain / avg_loss if avg_loss != 0 else 100
+        rsi      = 100 - (100 / (1 + rs))
     else:
         rsi = 50
 
@@ -90,63 +91,45 @@ def calculate_technical_indicators(prices: List[Dict]) -> Dict:
 
 
 def score_from_technical(indicators: Dict) -> Tuple[float, List[str]]:
-    score   = 0.0
-    reasons = []
-
+    score = 0.0; reasons = []
     rsi = indicators.get("rsi", 50)
     if rsi < 30:
-        score += 0.3
-        reasons.append(f"RSI at {rsi:.1f} indicates oversold conditions (bullish reversal signal)")
+        score += 0.3; reasons.append(f"RSI at {rsi:.1f} indicates oversold conditions (bullish reversal signal)")
     elif rsi > 70:
-        score -= 0.3
-        reasons.append(f"RSI at {rsi:.1f} indicates overbought conditions (bearish reversal signal)")
+        score -= 0.3; reasons.append(f"RSI at {rsi:.1f} indicates overbought conditions (bearish reversal signal)")
     elif rsi > 55:
-        score += 0.1
-        reasons.append(f"RSI at {rsi:.1f} shows moderate bullish momentum")
+        score += 0.1; reasons.append(f"RSI at {rsi:.1f} shows moderate bullish momentum")
     elif rsi < 45:
-        score -= 0.1
-        reasons.append(f"RSI at {rsi:.1f} shows moderate bearish pressure")
+        score -= 0.1; reasons.append(f"RSI at {rsi:.1f} shows moderate bearish pressure")
 
     macd_hist = indicators.get("macd_hist", 0)
     if macd_hist > 0:
-        score += 0.15
-        reasons.append("MACD histogram positive (bullish momentum)")
+        score += 0.15; reasons.append("MACD histogram positive (bullish momentum)")
     elif macd_hist < 0:
-        score -= 0.15
-        reasons.append("MACD histogram negative (bearish momentum)")
+        score -= 0.15; reasons.append("MACD histogram negative (bearish momentum)")
 
-    sma5    = indicators.get("sma5")
-    sma20   = indicators.get("sma20")
-    current = indicators.get("current_price")
+    sma5 = indicators.get("sma5"); sma20 = indicators.get("sma20"); current = indicators.get("current_price")
     if sma5 and sma20 and current:
         if sma5 > sma20:
-            score += 0.2
-            reasons.append("5-day SMA above 20-day SMA (golden cross pattern, bullish)")
+            score += 0.2; reasons.append("5-day SMA above 20-day SMA (golden cross pattern, bullish)")
         else:
-            score -= 0.2
-            reasons.append("5-day SMA below 20-day SMA (death cross pattern, bearish)")
+            score -= 0.2; reasons.append("5-day SMA below 20-day SMA (death cross pattern, bearish)")
         if current > sma20:
-            score += 0.1
-            reasons.append("Price trading above 20-day moving average (bullish)")
+            score += 0.1; reasons.append("Price trading above 20-day moving average (bullish)")
         else:
-            score -= 0.1
-            reasons.append("Price trading below 20-day moving average (bearish)")
+            score -= 0.1; reasons.append("Price trading below 20-day moving average (bearish)")
 
     bb_pos = indicators.get("bb_position", 0.5)
     if bb_pos > 0.8:
-        score -= 0.1
-        reasons.append("Price near upper Bollinger Band (potential resistance/overbought)")
+        score -= 0.1; reasons.append("Price near upper Bollinger Band (potential resistance/overbought)")
     elif bb_pos < 0.2:
-        score += 0.1
-        reasons.append("Price near lower Bollinger Band (potential support/oversold)")
+        score += 0.1; reasons.append("Price near lower Bollinger Band (potential support/oversold)")
 
     ret_5d = indicators.get("returns_5d", 0)
     if ret_5d > 0.05:
-        score += 0.1
-        reasons.append(f"Strong 5-day momentum: +{ret_5d*100:.1f}%")
+        score += 0.1; reasons.append(f"Strong 5-day momentum: +{ret_5d*100:.1f}%")
     elif ret_5d < -0.05:
-        score -= 0.1
-        reasons.append(f"Weak 5-day momentum: {ret_5d*100:.1f}%")
+        score -= 0.1; reasons.append(f"Weak 5-day momentum: {ret_5d*100:.1f}%")
 
     vol_ratio = indicators.get("volume_ratio", 1)
     if vol_ratio > 1.5:
@@ -177,35 +160,27 @@ def score_from_sentiment(news_items: List[Dict]) -> Tuple[float, List[str]]:
 
 
 def score_from_macro(economic_data: Dict) -> Tuple[float, List[str]]:
-    score   = 0.0
-    reasons = []
+    score = 0.0; reasons = []
     vix = economic_data.get("VIX")
     if vix:
         if vix < 15:
-            score += 0.15
-            reasons.append(f"VIX at {vix:.1f} (low fear, bullish market environment)")
+            score += 0.15; reasons.append(f"VIX at {vix:.1f} (low fear, bullish market environment)")
         elif vix > 30:
-            score -= 0.25
-            reasons.append(f"VIX at {vix:.1f} (high fear/volatility, bearish signal)")
+            score -= 0.25; reasons.append(f"VIX at {vix:.1f} (high fear/volatility, bearish signal)")
         elif vix > 20:
-            score -= 0.1
-            reasons.append(f"VIX at {vix:.1f} (elevated fear, cautious environment)")
+            score -= 0.1;  reasons.append(f"VIX at {vix:.1f} (elevated fear, cautious environment)")
     yield_spread = economic_data.get("T10Y2Y")
     if yield_spread is not None:
         if yield_spread < 0:
-            score -= 0.2
-            reasons.append(f"Inverted yield curve (spread: {yield_spread:.2f}%) - historical recession indicator")
+            score -= 0.2; reasons.append(f"Inverted yield curve (spread: {yield_spread:.2f}%) - historical recession indicator")
         elif yield_spread > 0.5:
-            score += 0.1
-            reasons.append(f"Positive yield curve spread ({yield_spread:.2f}%) - healthy expansion signal")
+            score += 0.1; reasons.append(f"Positive yield curve spread ({yield_spread:.2f}%) - healthy expansion signal")
     fed_rate = economic_data.get("FEDFUNDS")
     if fed_rate:
         if fed_rate > 5:
-            score -= 0.15
-            reasons.append(f"High interest rates ({fed_rate:.2f}%) compress equity valuations")
+            score -= 0.15; reasons.append(f"High interest rates ({fed_rate:.2f}%) compress equity valuations")
         elif fed_rate < 2:
-            score += 0.15
-            reasons.append(f"Low interest rates ({fed_rate:.2f}%) support equity valuations")
+            score += 0.15; reasons.append(f"Low interest rates ({fed_rate:.2f}%) support equity valuations")
     return max(-1.0, min(1.0, score)), reasons
 
 
@@ -214,14 +189,7 @@ def generate_prediction(
     economic_data, sector_performance,
     profile=None, ml_result=None,
 ) -> Dict:
-    """
-    Core prediction assembler.  Blends the legacy weighted-score with ML if
-    ml_result is provided.  The ML ensemble probability replaces the technical
-    component in the composite (since the ML model already incorporates most
-    technical signals).
-    """
-    sources_used = []
-    all_reasons  = []
+    sources_used = []; all_reasons = []
 
     tech_score, tech_reasons = score_from_technical(technical_indicators)
     all_reasons.extend(tech_reasons)
@@ -242,25 +210,18 @@ def generate_prediction(
     sector_score = 0.0
     sector_name  = (profile or {}).get("sector", "")
     if sector_name and sector_name in sector_performance:
-        sp             = sector_performance[sector_name]
-        sector_change  = sp.get("change_pct", 0)
-        sector_score   = min(1, max(-1, sector_change / 2))
+        sp            = sector_performance[sector_name]
+        sector_change = sp.get("change_pct", 0)
+        sector_score  = min(1, max(-1, sector_change / 2))
         if abs(sector_change) > 0.5:
             sign = "up" if sector_change > 0 else "down"
             word = "positive sector tailwind" if sector_change > 0 else "sector headwind"
             all_reasons.append(f"Sector ({sector_name}) {sign} {sector_change:.2f}% today — {word}")
             sources_used.append(f"Sector ETF performance data ({sp.get('etf', 'N/A')})")
 
-    # ── Composite score ───────────────────────────────────────────────────────
     if ml_result:
-        # ML probability mapped to [-1, +1] replaces the raw technical score.
-        ml_score = (ml_result["ensemble_prob"] - 0.5) * 2
-        composite = (
-            ml_score        * 0.50 +
-            sentiment_score * 0.25 +
-            macro_score     * 0.15 +
-            sector_score    * 0.10
-        )
+        ml_score  = (ml_result["ensemble_prob"] - 0.5) * 2
+        composite = ml_score * 0.50 + sentiment_score * 0.25 + macro_score * 0.15 + sector_score * 0.10
         ml_direction   = ml_result["direction"]
         ml_confidence  = ml_result["confidence"]
         ml_tree_prob   = ml_result["tree_prob"]
@@ -272,40 +233,32 @@ def generate_prediction(
         sources_used.append("Scikit-learn LogisticRegression (Model B)")
         all_reasons.append(
             f"ML ensemble: {ml_direction} @ {ml_confidence*100:.1f}% confidence "
-            f"(RF: {ml_tree_prob:.3f}, LR: {ml_logreg_prob:.3f}, ensemble: {ml_ens_prob:.3f})"
+            f"(RF: {ml_tree_prob:.3f}, LR: {ml_logreg_prob:.3f}, ens: {ml_ens_prob:.3f})"
         )
     else:
-        # Fallback: pure heuristic
         if technical_indicators:
-            composite = (tech_score * 0.40) + (sentiment_score * 0.30) + (macro_score * 0.20) + (sector_score * 0.10)
+            composite = tech_score * 0.40 + sentiment_score * 0.30 + macro_score * 0.20 + sector_score * 0.10
         else:
-            composite = (sentiment_score * 0.50) + (macro_score * 0.35) + (sector_score * 0.15)
+            composite = sentiment_score * 0.50 + macro_score * 0.35 + sector_score * 0.15
         ml_direction = ml_confidence = ml_tree_prob = ml_logreg_prob = ml_ens_prob = None
         val_acc = train_end = None
 
-    # ── Map composite → probabilities ─────────────────────────────────────────
-    volatility   = technical_indicators.get("volatility", 0.02)
-    raw_prob_up  = (composite + 1) / 2
-    prob_up      = min(0.85, max(0.15, raw_prob_up))
-    prob_down    = min(0.85, max(0.15, 1 - raw_prob_up))
-    total        = prob_up + prob_down
-    prob_up     /= total
-    prob_down   /= total
+    volatility  = technical_indicators.get("volatility", 0.02)
+    raw_prob_up = (composite + 1) / 2
+    prob_up     = min(0.85, max(0.15, raw_prob_up))
+    prob_down   = min(0.85, max(0.15, 1 - raw_prob_up))
+    total       = prob_up + prob_down
+    prob_up    /= total; prob_down /= total
     prob_neutral = max(0, 1 - prob_up - prob_down) * 0.15
     total        = prob_up + prob_down + prob_neutral
-    prob_up     /= total
-    prob_down   /= total
-    prob_neutral /= total
+    prob_up /= total; prob_down /= total; prob_neutral /= total
 
     if prob_up > 0.5 and prob_up > prob_down + 0.05:
-        direction  = "UP"
-        confidence = prob_up
+        direction = "UP";      confidence = prob_up
     elif prob_down > 0.5 and prob_down > prob_up + 0.05:
-        direction  = "DOWN"
-        confidence = prob_down
+        direction = "DOWN";    confidence = prob_down
     else:
-        direction  = "NEUTRAL"
-        confidence = prob_neutral + 0.5
+        direction = "NEUTRAL"; confidence = prob_neutral + 0.5
 
     confidence       = max(0.5, min(0.95, confidence))
     estimated_change = composite * volatility * 100 * 2
@@ -335,18 +288,18 @@ Direction: {direction} | Confidence: {confidence*100:.1f}% | Estimated Move: {es
 ⚠️ {DISCLAIMER}
 """.strip()
 
-    result = {
-        "ticker":                  ticker,
-        "prediction_date":         datetime.utcnow().isoformat(),
-        "target_date":             (datetime.utcnow() + timedelta(days=1)).isoformat(),
-        "predicted_direction":     direction,
-        "predicted_change_pct":    round(estimated_change, 3),
-        "confidence":              round(confidence, 3),
-        "probability_up":          round(prob_up, 3),
-        "probability_down":        round(prob_down, 3),
-        "probability_neutral":     round(prob_neutral, 3),
-        "rationale":               rationale,
-        "sources_used":            list(set(sources_used)),
+    return {
+        "ticker":                ticker,
+        "prediction_date":       datetime.utcnow().isoformat(),
+        "target_date":           (datetime.utcnow() + timedelta(days=1)).isoformat(),
+        "predicted_direction":   direction,
+        "predicted_change_pct":  round(estimated_change, 3),
+        "confidence":            round(confidence, 3),
+        "probability_up":        round(prob_up, 3),
+        "probability_down":      round(prob_down, 3),
+        "probability_neutral":   round(prob_neutral, 3),
+        "rationale":             rationale,
+        "sources_used":          list(set(sources_used)),
         "features_used": {
             "technical_score":  round(tech_score, 3),
             "sentiment_score":  round(sentiment_score, 3),
@@ -358,29 +311,24 @@ Direction: {direction} | Confidence: {confidence*100:.1f}% | Estimated Move: {es
                 "ml_tree_prob":     ml_tree_prob,
                 "ml_logreg_prob":   ml_logreg_prob} if ml_result else {}),
         },
-        "model_version": MODEL_VERSION,
-        "disclaimer":    DISCLAIMER,
-        # Extra ML fields (optional; used by the metrics endpoint)
+        "model_version":   MODEL_VERSION,
+        "disclaimer":      DISCLAIMER,
         "ml_available":    ml_result is not None,
         "ml_val_accuracy": val_acc,
         "ml_train_end":    train_end,
     }
-    return result
 
 
-# ─── PredictionEngine ─────────────────────────────────────────────────────────
+# ─── PredictionEngine ──────────────────────────────────────────────────────────
 
 class PredictionEngine:
     def __init__(self):
         self._economic_cache: Dict = {}
         self._sector_cache:   Dict = {}
         self._cache_time:     Optional[datetime] = None
-        self._models:         Optional[Dict] = None   # lazy-loaded
-
-    # ── Internal helpers ──────────────────────────────────────────────────────
+        self._models:         Optional[Dict] = None
 
     def _get_models(self) -> Optional[Dict]:
-        """Lazy-load models from disk (cached in memory once loaded)."""
         if self._models is not None:
             return self._models
         from app.services.ml_pipeline import load_models_sync
@@ -388,6 +336,8 @@ class PredictionEngine:
         if models:
             self._models = models
             logger.info("ML models loaded from disk.")
+        else:
+            logger.info("No trained ML models found — predictions will use heuristic only.")
         return models
 
     def _invalidate_model_cache(self):
@@ -395,7 +345,6 @@ class PredictionEngine:
 
     @staticmethod
     def _history_to_df(history: List[Dict]) -> pd.DataFrame:
-        """Convert Yahoo history list → DataFrame(date, close, volume)."""
         rows = [
             {
                 "date":   pd.to_datetime(h["date"]),
@@ -409,83 +358,66 @@ class PredictionEngine:
             return pd.DataFrame(columns=["date", "close", "volume"])
         return pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
 
-    async def _refresh_macro_data(self, ingestion):
+    async def _refresh_macro_data(self):
+        """Refresh macro + sector cache using the shared ingestion singleton."""
+        from app.services.data_ingestion import ingestion_service
         try:
             vix_data, yield_data, fed_data = await asyncio.gather(
-                ingestion.get_fred_data("VIXCLS", 1),
-                ingestion.get_fred_data("T10Y2Y", 1),
-                ingestion.get_fred_data("FEDFUNDS", 1),
+                ingestion_service.get_fred_data("VIXCLS",   1),
+                ingestion_service.get_fred_data("T10Y2Y",   1),
+                ingestion_service.get_fred_data("FEDFUNDS", 1),
                 return_exceptions=True,
             )
-            if isinstance(vix_data, list)   and vix_data:
+            if isinstance(vix_data,   list) and vix_data:
                 self._economic_cache["VIX"]      = vix_data[0].get("value")
             if isinstance(yield_data, list) and yield_data:
                 self._economic_cache["T10Y2Y"]   = yield_data[0].get("value")
-            if isinstance(fed_data, list)   and fed_data:
+            if isinstance(fed_data,   list) and fed_data:
                 self._economic_cache["FEDFUNDS"] = fed_data[0].get("value")
-            self._sector_cache = await ingestion.get_sector_etf_data()
+            self._sector_cache = await ingestion_service.get_sector_etf_data()
             self._cache_time   = datetime.utcnow()
         except Exception as e:
             logger.error(f"Error refreshing macro data: {e}")
 
-    # ── Public: train_models ──────────────────────────────────────────────────
+    # ── train_models ──────────────────────────────────────────────────────────
 
     async def train_models(self, lookback_days: int = 730):
-        """
-        Nightly retrain job.  Fetches 2 years of history for TRAINING_TICKERS,
-        builds the pooled feature frame, trains both models, saves artifacts,
-        and writes MLModelMetric rows to the DB.
-
-        Called via scheduler: add_job(prediction.train_models, 'cron', hour=3)
-        """
-        from app.services.ml_pipeline import (
-            TRAINING_TICKERS, build_training_frame, train_models_sync,
-        )
-        from app.services.data_ingestion import DataIngestionService
+        from app.services.ml_pipeline import TRAINING_TICKERS, build_training_frame, train_models_sync
+        from app.services.data_ingestion import ingestion_service
         from app.database import AsyncSessionLocal, MLModelMetric
 
         logger.info("=== Starting nightly ML model training ===")
-        ingestion = DataIngestionService()
+        price_data: Dict = {}
 
-        # ── 1. Fetch price history ────────────────────────────────────────────
-        price_data: Dict[str, pd.DataFrame] = {}
         for ticker in TRAINING_TICKERS:
             try:
-                hist = await ingestion.get_yahoo_history(ticker, "2y")
+                hist = await ingestion_service.get_yahoo_history(ticker, "2y")
                 df   = self._history_to_df(hist)
                 if len(df) >= 60:
                     price_data[ticker] = df
                 else:
                     logger.warning(f"[train] {ticker}: only {len(df)} rows, skipping")
-                await asyncio.sleep(0.3)   # be gentle with Yahoo
+                await asyncio.sleep(0.3)
             except Exception as e:
                 logger.error(f"[train] History fetch failed for {ticker}: {e}")
-
-        await ingestion.close()
 
         if len(price_data) < 5:
             logger.error("[train] Not enough tickers with data. Aborting training.")
             return
 
-        # ── 2. Build training frame (sync, potentially slow) ──────────────────
         try:
             frame = await asyncio.to_thread(build_training_frame, price_data)
         except Exception as e:
-            logger.error(f"[train] build_training_frame failed: {e}")
-            return
+            logger.error(f"[train] build_training_frame failed: {e}"); return
 
-        # ── 3. Train models (sync, CPU-bound) ────────────────────────────────
         try:
             result = await asyncio.to_thread(train_models_sync, frame)
         except Exception as e:
-            logger.error(f"[train] train_models_sync failed: {e}")
-            return
+            logger.error(f"[train] train_models_sync failed: {e}"); return
 
-        # ── 4. Invalidate in-memory model cache ───────────────────────────────
         self._invalidate_model_cache()
 
-        # ── 5. Write MLModelMetric rows ───────────────────────────────────────
-        meta = result["meta"]
+        meta           = result["meta"]
         train_end_date = datetime.utcnow()
 
         async with AsyncSessionLocal() as session:
@@ -504,46 +436,42 @@ class PredictionEngine:
             await session.commit()
 
         logger.info(
-            f"=== Training complete — tree_acc={meta['tree_metrics']['val_accuracy']:.3f} "
+            f"=== Training complete — "
+            f"tree_acc={meta['tree_metrics']['val_accuracy']:.3f}  "
             f"logreg_acc={meta['logreg_metrics']['val_accuracy']:.3f} ==="
         )
 
-    # ── Public: predict_ticker ────────────────────────────────────────────────
+    # ── predict_ticker ────────────────────────────────────────────────────────
 
     async def predict_ticker(self, ticker: str) -> Optional[Dict]:
-        from app.services.data_ingestion import DataIngestionService
+        from app.services.data_ingestion import ingestion_service
         from app.services.ml_pipeline import predict_row_sync
-
-        ingestion = DataIngestionService()
 
         try:
             history, profile, av_news, gdelt_news = await asyncio.gather(
-                ingestion.get_yahoo_history(ticker, "1y"),
-                ingestion.get_yahoo_profile(ticker),
-                ingestion.get_alpha_vantage_news(ticker),
-                ingestion.get_gdelt_news(ticker),
+                ingestion_service.get_yahoo_history(ticker, "1y"),
+                ingestion_service.get_yahoo_profile(ticker),
+                ingestion_service.get_alpha_vantage_news(ticker),
+                ingestion_service.get_gdelt_news(ticker),
                 return_exceptions=True,
             )
 
-            history   = history   if isinstance(history,   list) else []
-            profile   = profile   if isinstance(profile,   dict) else {}
-            av_news   = av_news   if isinstance(av_news,   list) else []
-            gdelt_news= gdelt_news if isinstance(gdelt_news, list) else []
-            all_news  = av_news + gdelt_news
+            history    = history    if isinstance(history,    list) else []
+            profile    = profile    if isinstance(profile,    dict) else {}
+            av_news    = av_news    if isinstance(av_news,    list) else []
+            gdelt_news = gdelt_news if isinstance(gdelt_news, list) else []
+            all_news   = av_news + gdelt_news
 
-            # Refresh macro cache if stale (>1 h)
             if not self._economic_cache or (
                 self._cache_time and
                 (datetime.utcnow() - self._cache_time).seconds > 3600
             ):
-                await self._refresh_macro_data(ingestion)
+                await self._refresh_macro_data()
 
-            # Legacy heuristic indicators
             indicators = calculate_technical_indicators(history)
 
-            # ML inference (if models trained)
             ml_result = None
-            models = self._get_models()
+            models    = self._get_models()
             if models and history:
                 df = self._history_to_df(history)
                 if len(df) >= 60:
@@ -552,24 +480,21 @@ class PredictionEngine:
                     except Exception as e:
                         logger.warning(f"ML inference failed for {ticker}: {e}")
 
-            prediction = generate_prediction(
-                ticker              = ticker,
-                technical_indicators= indicators,
-                news_items          = all_news,
-                economic_data       = self._economic_cache,
-                sector_performance  = self._sector_cache,
-                profile             = profile,
-                ml_result           = ml_result,
+            return generate_prediction(
+                ticker               = ticker,
+                technical_indicators = indicators,
+                news_items           = all_news,
+                economic_data        = self._economic_cache,
+                sector_performance   = self._sector_cache,
+                profile              = profile,
+                ml_result            = ml_result,
             )
-            await ingestion.close()
-            return prediction
 
         except Exception as e:
             logger.error(f"Prediction error for {ticker}: {e}", exc_info=True)
-            await ingestion.close()
             return None
 
-    # ── Scheduled: run_predictions ────────────────────────────────────────────
+    # ── run_predictions ───────────────────────────────────────────────────────
 
     async def run_predictions(self):
         logger.info("Running scheduled predictions...")
@@ -607,71 +532,66 @@ class PredictionEngine:
             except Exception as e:
                 logger.error(f"Error predicting {stock.ticker}: {e}")
 
-    # ── Scheduled: evaluate_past_predictions ─────────────────────────────────
+    # ── evaluate_past_predictions ─────────────────────────────────────────────
 
     async def evaluate_past_predictions(self):
         logger.info("Evaluating past predictions...")
         from app.database import AsyncSessionLocal, Prediction, ModelMetrics
         from sqlalchemy import select, update
-        from app.services.data_ingestion import DataIngestionService
+        from app.services.data_ingestion import ingestion_service
 
-        ingestion = DataIngestionService()
-        try:
-            async with AsyncSessionLocal() as session:
-                yesterday = datetime.utcnow() - timedelta(days=1)
-                result = await session.execute(
-                    select(Prediction).where(
-                        Prediction.target_date <= datetime.utcnow(),
-                        Prediction.was_correct == None,
-                        Prediction.prediction_date >= yesterday - timedelta(days=7),
-                    ).limit(100)
-                )
-                predictions = result.scalars().all()
+        async with AsyncSessionLocal() as session:
+            yesterday = datetime.utcnow() - timedelta(days=1)
+            result    = await session.execute(
+                select(Prediction).where(
+                    Prediction.target_date  <= datetime.utcnow(),
+                    Prediction.was_correct.is_(None),          # FIX: was == None (broken SQL)
+                    Prediction.prediction_date >= yesterday - timedelta(days=7),
+                ).limit(100)
+            )
+            predictions = result.scalars().all()
 
-                correct  = 0
-                evaluated= 0
-                for pred in predictions:
-                    try:
-                        quote = await ingestion.get_yahoo_quote(pred.ticker)
-                        if quote and quote.get("current_price") and quote.get("previous_close"):
-                            actual_change = (
-                                (quote["current_price"] - quote["previous_close"])
-                                / quote["previous_close"]
+            correct = 0; evaluated = 0
+            for pred in predictions:
+                try:
+                    quote = await ingestion_service.get_yahoo_quote(pred.ticker)
+                    if quote and quote.get("current_price") and quote.get("previous_close"):
+                        actual_change = (
+                            (quote["current_price"] - quote["previous_close"])
+                            / quote["previous_close"]
+                        )
+                        actual_dir  = "UP" if actual_change > 0.005 else "DOWN" if actual_change < -0.005 else "NEUTRAL"
+                        was_correct = actual_dir == pred.predicted_direction
+                        if was_correct:
+                            correct += 1
+                        evaluated += 1
+                        await session.execute(
+                            update(Prediction).where(Prediction.id == pred.id).values(
+                                actual_direction  = actual_dir,
+                                actual_change_pct = actual_change * 100,
+                                was_correct       = was_correct,
                             )
-                            actual_dir = (
-                                "UP"   if actual_change >  0.005 else
-                                "DOWN" if actual_change < -0.005 else "NEUTRAL"
-                            )
-                            was_correct = actual_dir == pred.predicted_direction
-                            if was_correct:
-                                correct += 1
-                            evaluated += 1
-                            await session.execute(
-                                update(Prediction)
-                                .where(Prediction.id == pred.id)
-                                .values(
-                                    actual_direction  = actual_dir,
-                                    actual_change_pct = actual_change * 100,
-                                    was_correct       = was_correct,
-                                )
-                            )
-                    except Exception as e:
-                        logger.error(f"Evaluation error for {pred.ticker}: {e}")
+                        )
+                except Exception as e:
+                    logger.error(f"Evaluation error for {pred.ticker}: {e}")
 
-                if evaluated > 0:
-                    accuracy = correct / evaluated
-                    session.add(ModelMetrics(
-                        model_version      = MODEL_VERSION,
-                        evaluation_date    = datetime.utcnow(),
-                        accuracy           = accuracy,
-                        total_predictions  = evaluated,
-                        correct_predictions= correct,
-                        precision          = accuracy,
-                        recall             = accuracy,
-                        f1_score           = accuracy,
-                    ))
-                    logger.info(f"Prediction accuracy: {accuracy:.2%} ({correct}/{evaluated})")
+            if evaluated > 0:
+                accuracy = correct / evaluated
+                session.add(ModelMetrics(
+                    model_version       = MODEL_VERSION,
+                    evaluation_date     = datetime.utcnow(),
+                    accuracy            = accuracy,
+                    total_predictions   = evaluated,
+                    correct_predictions = correct,
+                    precision           = accuracy,
+                    recall              = accuracy,
+                    f1_score            = accuracy,
+                ))
+                logger.info(f"Prediction accuracy: {accuracy:.2%} ({correct}/{evaluated})")
 
-                await session.commit()
-        finally:
-            await ingestion.close()
+            await session.commit()
+
+
+# ── Module-level singleton ─────────────────────────────────────────────────────
+# Both main.py and predictions.py import this so they share macro/sector cache.
+prediction_engine = PredictionEngine()
