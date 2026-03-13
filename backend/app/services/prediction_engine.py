@@ -382,34 +382,85 @@ class PredictionEngine:
     # ── train_models ──────────────────────────────────────────────────────────
 
     async def train_models(self, lookback_days: int = 730):
-        from app.services.ml_pipeline import TRAINING_TICKERS, build_training_frame, train_models_sync
+        from app.services.ml_pipeline import (
+            ALL_TICKERS, VIX_TICKER, MARKET_TICKERS,
+            load_cached, merge_and_cache, cache_is_fresh,
+            build_market_features, build_training_frame, train_models_sync,
+        )
         from app.services.data_ingestion import ingestion_service
         from app.database import AsyncSessionLocal, MLModelMetric
 
-        logger.info("=== Starting nightly ML model training ===")
-        price_data: Dict = {}
+        logger.info("=== Starting nightly ML model training (v3 — parquet cache) ===")
 
-        for ticker in TRAINING_TICKERS:
+        # ── Step 1: Refresh price cache for all tickers ───────────────────────
+        # If cache is fresh (updated within last 1 day) → only fetch last 7 days.
+        # If cache is missing or stale → fetch full 2y history.
+        price_data: Dict = {}
+        all_symbols = list(dict.fromkeys(ALL_TICKERS + MARKET_TICKERS + [VIX_TICKER]))
+
+        for ticker in all_symbols:
             try:
-                hist = await ingestion_service.get_yahoo_history(ticker, "2y")
-                df   = self._history_to_df(hist)
-                if len(df) >= 60:
-                    price_data[ticker] = df
+                if cache_is_fresh(ticker, max_age_days=1):
+                    # Incremental update — fetch last 7 days only
+                    hist = await ingestion_service.get_yahoo_history(ticker, "5d")
+                    period_label = "5d (incremental)"
                 else:
-                    logger.warning(f"[train] {ticker}: only {len(df)} rows, skipping")
-                await asyncio.sleep(0.3)
+                    # Cold start or stale cache — full 2-year history
+                    hist = await ingestion_service.get_yahoo_history(ticker, "2y")
+                    period_label = "2y (cold start)"
+
+                new_rows = self._history_to_df(hist)
+                if not new_rows.empty:
+                    df = merge_and_cache(ticker, new_rows)
+                    logger.info(f"[cache] {ticker}: {period_label} → {len(df)} rows cached")
+                else:
+                    df = load_cached(ticker)
+                    if df is None:
+                        logger.warning(f"[cache] {ticker}: no data available, skipping")
+                        continue
+
+                if ticker not in (MARKET_TICKERS + [VIX_TICKER]) and len(df) >= 60:
+                    price_data[ticker] = df
+
+                await asyncio.sleep(0.2)   # gentle pacing — Yahoo rate limit
+
             except Exception as e:
-                logger.error(f"[train] History fetch failed for {ticker}: {e}")
+                logger.error(f"[cache] Fetch failed for {ticker}: {e}")
+                # Fall back to whatever is on disk
+                df = load_cached(ticker)
+                if df is not None and len(df) >= 60 and ticker not in (MARKET_TICKERS + [VIX_TICKER]):
+                    price_data[ticker] = df
 
         if len(price_data) < 5:
             logger.error("[train] Not enough tickers with data. Aborting training.")
             return
 
+        # ── Step 2: Build market context feature frame ────────────────────────
+        market_features = None
         try:
-            frame = await asyncio.to_thread(build_training_frame, price_data)
+            spy_df = load_cached("SPY") or pd.DataFrame()
+            qqq_df = load_cached("QQQ") or pd.DataFrame()
+            vix_df = load_cached("_VIX") or pd.DataFrame()   # stored as _VIX (^ stripped)
+            if not spy_df.empty:
+                market_features = await asyncio.to_thread(
+                    build_market_features, spy_df, qqq_df, vix_df
+                )
+                logger.info(
+                    f"[train] Market features built: {len(market_features)} dates "
+                    f"({'VIX available' if not vix_df.empty else 'VIX missing — zeroed'})"
+                )
+            else:
+                logger.warning("[train] SPY cache empty — market features will be zeroed")
+        except Exception as e:
+            logger.warning(f"[train] Market feature build failed: {e} — continuing without")
+
+        # ── Step 3: Build pooled training frame ───────────────────────────────
+        try:
+            frame = await asyncio.to_thread(build_training_frame, price_data, market_features)
         except Exception as e:
             logger.error(f"[train] build_training_frame failed: {e}"); return
 
+        # ── Step 4: Train models ───────────────────────────────────────────────
         try:
             result = await asyncio.to_thread(train_models_sync, frame)
         except Exception as e:
@@ -476,7 +527,21 @@ class PredictionEngine:
                 df = self._history_to_df(history)
                 if len(df) >= 60:
                     try:
-                        ml_result = await asyncio.to_thread(predict_row_sync, df, models)
+                        # Load market context from parquet cache — no HTTP call at inference
+                        from app.services.ml_pipeline import (
+                            load_cached, build_market_features,
+                        )
+                        spy_df = load_cached("SPY") or pd.DataFrame()
+                        qqq_df = load_cached("QQQ") or pd.DataFrame()
+                        vix_df = load_cached("_VIX") or pd.DataFrame()
+                        market_features = None
+                        if not spy_df.empty:
+                            market_features = await asyncio.to_thread(
+                                build_market_features, spy_df, qqq_df, vix_df
+                            )
+                        ml_result = await asyncio.to_thread(
+                            predict_row_sync, df, models, market_features
+                        )
                     except Exception as e:
                         logger.warning(f"ML inference failed for {ticker}: {e}")
 
