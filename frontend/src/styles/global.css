@@ -540,3 +540,128 @@ a {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ═══════════════════════════════════════════════
+   EXCHANGE BADGE (carried over from old design)
+   ═══════════════════════════════════════════════ */
+
+.exchange-badge {
+  font-size: 8px;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: 2px;
+  padding: 1px 4px;
+  letter-spacing: 0.08em;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+
+/* ═══════════════════════════════════════════════
+   ERROR BANNER
+   ═══════════════════════════════════════════════ */
+
+.error-banner {
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--radius-md);
+  padding: 10px 16px;
+  margin: 12px 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--red);
+}
+
+
+/* ═══════════════════════════════════════════════
+   SKELETON LOADER
+   ═══════════════════════════════════════════════ */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 25%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.04) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+
+/* ═══════════════════════════════════════════════
+   PAGINATION
+   ═══════════════════════════════════════════════ */
+
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.page-info {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.page-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.page-btn {
+  background: transparent;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  padding: 5px 11px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.page-btn:hover:not(:disabled) {
+  border-color: var(--border-emphasis);
+  color: var(--text-primary);
+}
+
+.page-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.page-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-base);
+  font-weight: 700;
+}
+
+
+/* ═══════════════════════════════════════════════
+   RESPONSIVE ADDITIONS
+   ═══════════════════════════════════════════════ */
+
+@media (max-width: 640px) {
+  .pagination {
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .exchange-badge {
+    display: none;
+  }
+}
