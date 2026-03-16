@@ -5,12 +5,11 @@ import Header from './components/Header';
 import Footer from './components/Footer';
 import TickerList from './pages/TickerList';
 import StockDetail from './pages/StockDetail';
-import MarketOverview from './components/MarketOverview';
 
 function App() {
   return (
     <BrowserRouter>
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <div className="app-container" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
         <Header />
         <main style={{ flex: 1 }}>
           <Routes>
